@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# Production builds
+dist/
+build/
+*.egg-info/
+
+# Environment variables
+.env
+!.env.example
+
+# Database & SQLite files
+*.sqlite3
+*.db
+persona_hire.db
+
+# Storage / uploads
+storage/uploads/
+uploads/
+*.pdf
+*.docx
+!frontend/public/*.pdf
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Docker
+.docker/

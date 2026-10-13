@@ -1,0 +1,129 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: persona_hire_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-persona_hire}
+      POSTGRES_USER: ${POSTGRES_USER:-persona_hire}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_for_local_development}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-persona_hire} -d ${POSTGRES_DB:-persona_hire}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - persona_hire_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: persona_hire_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - persona_hire_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: persona_hire_backend
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/storage/uploads
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://persona_hire:change_me_for_local_development@db:5432/persona_hire}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-meta-llama/llama-3.3-70b-instruct}
+      - AI_PRIMARY_PROVIDER=${AI_PRIMARY_PROVIDER:-groq}
+      - AI_REQUEST_TIMEOUT=${AI_REQUEST_TIMEOUT:-30}
+      - AI_MAX_RETRIES=${AI_MAX_RETRIES:-2}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-persona_hire_super_secret_jwt_key_2026_change_in_production}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - UPLOAD_DIR=/app/storage/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - persona_hire_net
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: persona_hire_worker
+    restart: unless-stopped
+    command: python -m app.workers.task_worker
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/storage/uploads
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://persona_hire:change_me_for_local_development@db:5432/persona_hire}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-meta-llama/llama-3.3-70b-instruct}
+      - AI_PRIMARY_PROVIDER=${AI_PRIMARY_PROVIDER:-groq}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-persona_hire_super_secret_jwt_key_2026_change_in_production}
+      - UPLOAD_DIR=/app/storage/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - persona_hire_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: persona_hire_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - persona_hire_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_uploads:
+
+networks:
+  persona_hire_net:
+    driver: bridge
