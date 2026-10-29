@@ -19,7 +19,8 @@ import {
   LogOut,
   Square,
   Brain,
-  ChevronDown
+  ChevronDown,
+  Radio
 } from 'lucide-react';
 import { api } from '../api/client';
 import { InterviewQuestion, AnswerFeedback } from '../types';
@@ -47,11 +48,26 @@ export const LiveMockInterviewPage: React.FC = () => {
   const [interviewerReply, setInterviewerReply] = useState<string>(openingState.interviewer_reply || '');
   const [interviewerThought, setInterviewerThought] = useState<string>(openingState.interviewer_thought || '');
   const [showThought, setShowThought] = useState(true);
+  const [liveMode, setLiveMode] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<any>(null);
   const recognitionRef = useRef<any>(null);
+  const liveModeRef = useRef(true);
+  const autoSubmitRef = useRef(false);
+  const heardSpeechRef = useRef(false);
+  const vadCleanupRef = useRef<() => void>(() => {});
+  const speakTokenRef = useRef(0);
+  const currentQuestionRef = useRef<InterviewQuestion | null>(null);
+  const elapsedRef = useRef(0);
+  const isCompletedRef = useRef(false);
+  const submittingRef = useRef(false);
+  liveModeRef.current = liveMode;
+  currentQuestionRef.current = currentQuestion;
+  elapsedRef.current = elapsedSeconds;
+  isCompletedRef.current = isCompleted;
 
   // Load session
   useEffect(() => {
@@ -78,6 +94,10 @@ export const LiveMockInterviewPage: React.FC = () => {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      autoSubmitRef.current = false;
+      speakTokenRef.current++;
+      vadCleanupRef.current();
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
@@ -94,28 +114,46 @@ export const LiveMockInterviewPage: React.FC = () => {
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  // Text-to-Speech: Speak Question aloud
-  const speakQuestion = (text: string) => {
-    if (!('speechSynthesis' in window) || !ttsEnabled) return;
+  // Text-to-Speech: speak aloud, then call onEnd (also called immediately if TTS is unavailable/muted)
+  const speak = (text: string, onEnd?: () => void) => {
+    const token = ++speakTokenRef.current;
+    const done = () => {
+      if (token !== speakTokenRef.current) return;
+      setIsSpeaking(false);
+      onEnd?.();
+    };
+    if (!('speechSynthesis' in window) || !ttsEnabled || !text) {
+      done();
+      return;
+    }
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
+    utterance.onend = done;
+    utterance.onerror = done;
+    setIsSpeaking(true);
     window.speechSynthesis.speak(utterance);
+    // Chrome sometimes never fires onend; don't let the live loop stall
+    setTimeout(done, Math.max(8000, text.length * 90));
   };
 
-  // Speak the interviewer's conversational reaction followed by the next question
+  // Speak the interviewer's reaction + next question, then open the mic automatically in live mode
   useEffect(() => {
-    if (currentQuestion?.question_text && ttsEnabled) {
-      speakQuestion(`${interviewerReply} ${currentQuestion.question_text}`.trim());
-    }
+    if (!currentQuestion?.question_text) return;
+    speak(`${interviewerReply} ${currentQuestion.question_text}`.trim(), () => {
+      if (liveModeRef.current && !isCompletedRef.current) startWhisperRecording(true);
+    });
   }, [currentQuestion]);
 
   // Groq Whisper STT API (MediaRecorder)
-  const startWhisperRecording = async () => {
+  const startWhisperRecording = async (auto = false) => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
+      autoSubmitRef.current = auto;
+      heardSpeechRef.current = false;
 
       const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
       let selectedMime = '';
@@ -135,8 +173,50 @@ export const LiveMockInterviewPage: React.FC = () => {
         }
       };
 
+      // Voice-activity detection: end the turn after ~1.8s of silence once the candidate has spoken
+      vadCleanupRef.current();
+      if (auto) {
+        const AC = window.AudioContext || (window as any).webkitAudioContext;
+        const ctx = new AC();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const buf = new Uint8Array(analyser.fftSize);
+        const startedAt = Date.now();
+        let lastVoice = 0;
+        const iv = setInterval(() => {
+          analyser.getByteTimeDomainData(buf);
+          let sum = 0;
+          for (const v of buf) {
+            const d = (v - 128) / 128;
+            sum += d * d;
+          }
+          const now = Date.now();
+          if (Math.sqrt(sum / buf.length) > 0.03) {
+            heardSpeechRef.current = true;
+            lastVoice = now;
+          }
+          if (heardSpeechRef.current ? now - lastVoice > 1800 : now - startedAt > 20000) {
+            stopWhisperRecording();
+          }
+        }, 100);
+        vadCleanupRef.current = () => {
+          clearInterval(iv);
+          ctx.close().catch(() => {});
+          vadCleanupRef.current = () => {};
+        };
+      }
+
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
+        vadCleanupRef.current();
+        const auto = autoSubmitRef.current;
+        if (auto && !heardSpeechRef.current) {
+          setIsRecording(false);
+          setTranscriptionStatus("I didn't hear anything. Tap the mic to answer.");
+          setTimeout(() => setTranscriptionStatus(null), 5000);
+          return;
+        }
 
         const chunks = audioChunksRef.current;
         if (chunks.length === 0) {
@@ -156,9 +236,15 @@ export const LiveMockInterviewPage: React.FC = () => {
           const extension = (recorder.mimeType || '').includes('mp4') ? 'm4a' : 'webm';
           const res = await api.transcribeAudio(audioBlob, `interview_speech.${extension}`);
           if (res.text) {
-            setAnswerText((prev) => (prev ? `${prev} ${res.text}` : res.text));
             setTranscriptionStatus(`Transcribed via Groq Whisper (${res.model})`);
             setTimeout(() => setTranscriptionStatus(null), 4000);
+            if (auto && liveModeRef.current) {
+              setAnswerText(res.text);
+              setIsTranscribing(false);
+              await submitText(res.text);
+              return;
+            }
+            setAnswerText((prev) => (prev ? `${prev} ${res.text}` : res.text));
           }
         } catch (err: any) {
           console.error('STT API Error:', err);
@@ -183,6 +269,7 @@ export const LiveMockInterviewPage: React.FC = () => {
   };
 
   const stopWhisperRecording = () => {
+    vadCleanupRef.current();
     if (recordTimerRef.current) {
       clearInterval(recordTimerRef.current);
       recordTimerRef.current = null;
@@ -248,7 +335,7 @@ export const LiveMockInterviewPage: React.FC = () => {
       if (isRecording) {
         stopWhisperRecording();
       } else {
-        startWhisperRecording();
+        startWhisperRecording(liveModeRef.current);
       }
     } else {
       toggleSpeechRecognition();
@@ -256,29 +343,23 @@ export const LiveMockInterviewPage: React.FC = () => {
   };
 
   // Submit Answer
-  const handleSubmitAnswer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!answerText.trim() || !currentQuestion || !sessionId) return;
-    if (isRecording) {
-      if (sttMode === 'whisper_api') {
-        stopWhisperRecording();
-      } else {
-        recognitionRef.current?.stop();
-        setIsRecording(false);
-      }
-    }
-
+  const submitText = async (text: string) => {
+    const question = currentQuestionRef.current;
+    if (!text.trim() || !question || !sessionId || submittingRef.current) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
-      const fb = await api.submitAnswer(sessionId, currentQuestion.id, answerText, elapsedSeconds);
+      const fb = await api.submitAnswer(sessionId, question.id, text, elapsedRef.current);
       setLatestFeedback(fb);
       setInterviewerReply(fb.interviewer_reply || '');
       setInterviewerThought(fb.interviewer_thought || '');
 
       if (fb.is_interview_complete) {
         setIsCompleted(true);
+        isCompletedRef.current = true;
+        speak('That wraps up our interview. Thank you, your evaluation report is ready.');
       } else if (fb.next_question) {
-        // Advance to next question
+        // Advance to next question (the effect above speaks it, then re-opens the mic)
         setCurrentQuestion(fb.next_question);
         setQuestionIndex((prev) => prev + 1);
         setAnswerText('');
@@ -287,7 +368,35 @@ export const LiveMockInterviewPage: React.FC = () => {
     } catch (err) {
       console.error(err);
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitAnswer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isRecording) {
+      autoSubmitRef.current = false;
+      if (sttMode === 'whisper_api') {
+        stopWhisperRecording();
+      } else {
+        recognitionRef.current?.stop();
+        setIsRecording(false);
+      }
+    }
+    await submitText(answerText);
+  };
+
+  const toggleLiveMode = () => {
+    const next = !liveMode;
+    setLiveMode(next);
+    liveModeRef.current = next;
+    if (next) {
+      setSttMode('whisper_api');
+      if (!isRecording && !isSpeaking && !isSubmitting && !isCompleted) startWhisperRecording(true);
+    } else if (isRecording) {
+      autoSubmitRef.current = false;
+      stopWhisperRecording();
     }
   };
 
@@ -335,6 +444,16 @@ export const LiveMockInterviewPage: React.FC = () => {
             <span>{formatTime(elapsedSeconds)}</span>
           </div>
           <button
+            onClick={toggleLiveMode}
+            className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex items-center space-x-1.5 transition-colors ${
+              liveMode ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'
+            }`}
+            title="Hands-free live conversation: the mic opens after the interviewer speaks and submits when you stop talking"
+          >
+            <Radio className="w-3.5 h-3.5" />
+            <span>Live {liveMode ? 'On' : 'Off'}</span>
+          </button>
+          <button
             onClick={() => setTtsEnabled(!ttsEnabled)}
             className={`p-1.5 rounded-lg border transition-colors ${
               ttsEnabled ? 'bg-indigo-50 border-indigo-200 text-primary' : 'bg-slate-50 border-slate-200 text-slate-400'
@@ -372,6 +491,35 @@ export const LiveMockInterviewPage: React.FC = () => {
               Contextual Follow-up
             </span>
           )}
+        </div>
+
+        <div className="flex items-center space-x-2 text-[11px] font-semibold text-slate-500">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isSubmitting || isTranscribing
+                ? 'bg-amber-500 animate-pulse'
+                : isRecording
+                ? 'bg-red-500 animate-pulse'
+                : isSpeaking
+                ? 'bg-indigo-500 animate-pulse'
+                : 'bg-slate-300'
+            }`}
+          />
+          <span>
+            {isSubmitting
+              ? 'Interviewer is thinking...'
+              : isTranscribing
+              ? 'Transcribing your answer...'
+              : isRecording
+              ? liveMode
+                ? 'Listening... just stop talking when you are done'
+                : 'Recording...'
+              : isSpeaking
+              ? 'Interviewer is speaking...'
+              : liveMode
+              ? 'Tap the mic to answer'
+              : 'Your turn'}
+          </span>
         </div>
 
         {interviewerReply && (
