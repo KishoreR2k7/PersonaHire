@@ -179,3 +179,31 @@ def test_audio_transcription_endpoint():
     assert "text" in data
     assert data["provider"] == "groq"
 
+
+def test_groq_diagnostics_and_config():
+    # 1. Test invalid key handling
+    bad_resp = client.post("/api/v1/diagnostics/test-groq", json={"groq_api_key": "gsk_invalid_test_key"})
+    assert bad_resp.status_code == 200
+    bad_data = bad_resp.json()
+    assert bad_data["success"] is False
+    assert "Authentication failed" in bad_data["error"]
+
+    # 2. Test saving and clearing config
+    save_resp = client.post(
+        "/api/v1/diagnostics/groq-config",
+        json={"groq_api_key": "gsk_test_key_placeholder", "groq_model": "llama-3.3-70b-versatile"}
+    )
+    assert save_resp.status_code == 200
+    save_data = save_resp.json()
+    assert save_data["groq_available"] is True
+    assert save_data["groq_model"] == "llama-3.3-70b-versatile"
+    assert "groq_key_masked" in save_data
+
+    # Restore current key
+    from app.core.config import settings
+    if settings.GROQ_API_KEY:
+        client.post(
+            "/api/v1/diagnostics/groq-config",
+            json={"groq_api_key": settings.GROQ_API_KEY, "groq_model": settings.GROQ_MODEL}
+        )
+

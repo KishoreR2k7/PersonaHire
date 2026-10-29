@@ -59,7 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuToggle }) => {
             Provider:{' '}
             <strong className="text-slate-800 capitalize">
               {aiStatus?.active_provider === 'groq'
-                ? 'Groq Llama 3.3'
+                ? `Groq (${aiStatus?.groq_model?.split('/').pop()?.replace('-versatile', '') || 'LPU'})`
                 : aiStatus?.active_provider === 'openrouter'
                 ? 'OpenRouter'
                 : 'Heuristic Engine'}

@@ -23,10 +23,19 @@ class AIService:
         elif not has_groq and not has_openrouter:
             active_provider = "heuristic_engine"
 
+        groq_masked = None
+        if has_groq:
+            k = settings.GROQ_API_KEY.strip()
+            if len(k) > 12:
+                groq_masked = f"{k[:7]}...{k[-4:]}"
+            else:
+                groq_masked = "****"
+
         return {
             "primary_configured": settings.AI_PRIMARY_PROVIDER,
             "active_provider": active_provider,
             "groq_available": has_groq,
+            "groq_key_masked": groq_masked,
             "groq_model": settings.GROQ_MODEL,
             "groq_stt_model": getattr(settings, "GROQ_STT_MODEL", "whisper-large-v3-turbo"),
             "stt_available": has_groq,

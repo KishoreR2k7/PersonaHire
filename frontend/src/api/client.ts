@@ -208,6 +208,33 @@ class ApiClient {
   async getDiagnostics() {
     return this.request<any>('/diagnostics/ai-status');
   }
+
+  async testGroqConnection(groq_api_key?: string, groq_model?: string) {
+    return this.request<{
+      success: boolean;
+      message?: string;
+      error?: string;
+      latency_ms?: number;
+      model?: string;
+      available_models: string[];
+    }>('/diagnostics/test-groq', {
+      method: 'POST',
+      body: JSON.stringify({ groq_api_key, groq_model }),
+    });
+  }
+
+  async updateGroqConfig(groq_api_key: string, groq_model?: string, groq_stt_model?: string) {
+    return this.request<any>('/diagnostics/groq-config', {
+      method: 'POST',
+      body: JSON.stringify({ groq_api_key, groq_model, groq_stt_model }),
+    });
+  }
+
+  async clearGroqConfig() {
+    return this.request<any>('/diagnostics/groq-config/clear', {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new ApiClient();
