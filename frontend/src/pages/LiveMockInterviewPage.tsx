@@ -114,28 +114,103 @@ export const LiveMockInterviewPage: React.FC = () => {
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  // Text-to-Speech: speak aloud, then call onEnd (also called immediately if TTS is unavailable/muted)
+  // Helper to select a natural English Male voice
+  const getMaleVoice = (): SpeechSynthesisVoice | null => {
+    if (!('speechSynthesis' in window)) return null;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return null;
+
+    // 1. Prioritize known male English voices
+    const maleKeywords = ['david', 'mark', 'george', 'guy', 'male', 'richard', 'james', 'alex', 'natural'];
+    for (const keyword of maleKeywords) {
+      const found = voices.find(
+        (v) => v.lang.startsWith('en') && v.name.toLowerCase().includes(keyword)
+      );
+      if (found) return found;
+    }
+
+    // 2. Reject explicitly female voice names
+    const femaleKeywords = ['zira', 'female', 'samantha', 'victoria', 'karen', 'cynthia', 'susan', 'jenny', 'aria'];
+    const nonFemale = voices.find(
+      (v) => v.lang.startsWith('en') && !femaleKeywords.some((f) => v.name.toLowerCase().includes(f))
+    );
+    if (nonFemale) return nonFemale;
+
+    return voices.find((v) => v.lang.startsWith('en')) || voices[0] || null;
+  };
+
+  // Ensure voices are loaded asynchronously
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    const loadVoices = () => {
+      window.speechSynthesis.getVoices();
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
+    };
+  }, []);
+
+  // Text-to-Speech: speak aloud with male voice and calm pace, then call onEnd with echo delay
   const speak = (text: string, onEnd?: () => void) => {
     const token = ++speakTokenRef.current;
+
+    // Immediately stop mic so AI never speaks over active recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try { mediaRecorderRef.current.stop(); } catch {}
+      setIsRecording(false);
+    }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      setIsRecording(false);
+    }
+
     const done = () => {
       if (token !== speakTokenRef.current) return;
       setIsSpeaking(false);
-      onEnd?.();
+      // Wait 750ms after speech completely finishes so speaker audio does not bleed into the mic
+      setTimeout(() => {
+        if (token === speakTokenRef.current && !window.speechSynthesis.speaking) {
+          onEnd?.();
+        }
+      }, 750);
     };
+
     if (!('speechSynthesis' in window) || !ttsEnabled || !text) {
-      done();
+      setIsSpeaking(false);
+      setTimeout(done, 400);
       return;
     }
+
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+
+    // Apply Male Voice
+    const maleVoice = getMaleVoice();
+    if (maleVoice) {
+      utterance.voice = maleVoice;
+    }
+
+    // Natural, calm, steady professional interviewer pace
+    utterance.rate = 0.88;
+    utterance.pitch = 0.95;
+
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.stop(); } catch {}
+        setIsRecording(false);
+      }
+    };
+
     utterance.onend = done;
     utterance.onerror = done;
+
     setIsSpeaking(true);
     window.speechSynthesis.speak(utterance);
-    // Chrome sometimes never fires onend; don't let the live loop stall
-    setTimeout(done, Math.max(8000, text.length * 90));
   };
 
   // Speak the interviewer's reaction + next question, then open the mic automatically in live mode
@@ -148,6 +223,11 @@ export const LiveMockInterviewPage: React.FC = () => {
 
   // Groq Whisper STT API (MediaRecorder)
   const startWhisperRecording = async (auto = false) => {
+    // CRITICAL: NEVER record while AI is speaking
+    if (isSpeaking || ('speechSynthesis' in window && window.speechSynthesis.speaking)) {
+      console.log('Interviewer is currently speaking, mic postponed.');
+      return;
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
