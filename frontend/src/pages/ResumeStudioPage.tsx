@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Resume, StructuredResume } from '../types';
+import { ResumeRenderer, ResumeTemplateType, AccentColor } from '../components/resume/ResumeTemplates';
 
 export const ResumeStudioPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -29,7 +30,8 @@ export const ResumeStudioPage: React.FC = () => {
 
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null);
   const [resumeData, setResumeData] = useState<StructuredResume | null>(null);
-  const [template, setTemplate] = useState<'modern' | 'classic' | 'minimal'>('modern');
+  const [template, setTemplate] = useState<ResumeTemplateType>('modern');
+  const [accentColor, setAccentColor] = useState<AccentColor>('indigo');
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>('All changes saved');
 
@@ -145,27 +147,84 @@ export const ResumeStudioPage: React.FC = () => {
           <span className="text-xs text-slate-400 font-medium">{saveStatus}</span>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Template Switcher */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-lg text-xs font-semibold text-slate-600">
-            <button
-              onClick={() => setTemplate('modern')}
-              className={`px-2.5 py-1 rounded-md transition-all ${template === 'modern' ? 'bg-white text-primary shadow-xs' : ''}`}
-            >
-              Modern
-            </button>
-            <button
-              onClick={() => setTemplate('classic')}
-              className={`px-2.5 py-1 rounded-md transition-all ${template === 'classic' ? 'bg-white text-primary shadow-xs' : ''}`}
-            >
-              Classic
-            </button>
-            <button
-              onClick={() => setTemplate('minimal')}
-              className={`px-2.5 py-1 rounded-md transition-all ${template === 'minimal' ? 'bg-white text-primary shadow-xs' : ''}`}
-            >
-              Minimal
-            </button>
+          <div className="flex items-center flex-wrap gap-1.5">
+            <div className="flex items-center bg-slate-100 p-1 rounded-lg text-xs font-semibold text-slate-600">
+              <button
+                type="button"
+                onClick={() => setTemplate('modern')}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  template === 'modern' ? 'bg-white text-primary shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+                title="Silicon Valley Modern Tech Standard"
+              >
+                Modern
+              </button>
+              <button
+                type="button"
+                onClick={() => setTemplate('classic')}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  template === 'classic' ? 'bg-white text-primary shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+                title="Harvard / Ivy League Traditional ATS Format"
+              >
+                Classic Ivy
+              </button>
+              <button
+                type="button"
+                onClick={() => setTemplate('executive')}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  template === 'executive' ? 'bg-white text-primary shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+                title="Executive Two-Column Layout"
+              >
+                Executive 2-Col
+              </button>
+              <button
+                type="button"
+                onClick={() => setTemplate('minimal')}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  template === 'minimal' ? 'bg-white text-primary shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+                title="Scandinavian Minimalist"
+              >
+                Minimal
+              </button>
+              <button
+                type="button"
+                onClick={() => setTemplate('tech')}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  template === 'tech' ? 'bg-white text-primary shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+                title="Developer Monospace Tech Stack"
+              >
+                Developer
+              </button>
+            </div>
+
+            {/* Accent Color Palette */}
+            {(template === 'modern' || template === 'executive' || template === 'tech') && (
+              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg">
+                {[
+                  { id: 'indigo', bg: 'bg-indigo-600' },
+                  { id: 'emerald', bg: 'bg-emerald-600' },
+                  { id: 'blue', bg: 'bg-blue-600' },
+                  { id: 'slate', bg: 'bg-slate-800' },
+                  { id: 'rose', bg: 'bg-rose-600' },
+                ].map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setAccentColor(c.id as AccentColor)}
+                    className={`w-4 h-4 rounded-full ${c.bg} transition-transform ${
+                      accentColor === c.id ? 'scale-125 ring-2 ring-offset-1 ring-slate-400' : 'opacity-70 hover:opacity-100'
+                    }`}
+                    title={`Accent: ${c.id}`}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           <button
@@ -475,123 +534,13 @@ export const ResumeStudioPage: React.FC = () => {
 
           <div
             id="printable-resume"
-            className="bg-white border border-slate-300 rounded-xl p-8 shadow-card min-h-[750px] text-slate-900 transition-all font-sans"
-            style={{ fontSize: '13px', lineHeight: '1.5' }}
+            className="bg-white border border-slate-300 rounded-xl p-8 shadow-card min-h-[750px] transition-all"
           >
-            {/* Header */}
-            <div className={`border-b pb-4 mb-4 ${template === 'classic' ? 'text-center border-slate-900' : 'border-slate-300'}`}>
-              <h1 className="text-2xl font-black tracking-tight text-slate-950 uppercase">
-                {resumeData.contact?.full_name || 'Candidate Name'}
-              </h1>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 mt-1.5">
-                {resumeData.contact?.email && <span>{resumeData.contact.email}</span>}
-                {resumeData.contact?.phone && <span>• {resumeData.contact.phone}</span>}
-                {resumeData.contact?.location && <span>• {resumeData.contact.location}</span>}
-                {resumeData.contact?.linkedin && (
-                  <span>• {resumeData.contact.linkedin.replace('https://', '')}</span>
-                )}
-                {resumeData.contact?.github && (
-                  <span>• {resumeData.contact.github.replace('https://', '')}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Professional Summary */}
-            {resumeData.summary && (
-              <div className="mb-4">
-                <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 border-b border-slate-200 pb-0.5 mb-1.5">
-                  Professional Summary
-                </h2>
-                <p className="text-xs text-slate-700 leading-relaxed">{resumeData.summary}</p>
-              </div>
-            )}
-
-            {/* Technical Skills */}
-            {resumeData.skills && resumeData.skills.length > 0 && (
-              <div className="mb-4">
-                <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 border-b border-slate-200 pb-0.5 mb-1.5">
-                  Technical Competencies
-                </h2>
-                <div className="space-y-1 text-xs">
-                  {resumeData.skills.map((grp, idx) => (
-                    <div key={idx} className="flex">
-                      <strong className="w-36 text-slate-900 flex-shrink-0">{grp.category}:</strong>
-                      <span className="text-slate-700">{grp.items.join(', ')}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Experience */}
-            {resumeData.experience && resumeData.experience.length > 0 && (
-              <div className="mb-4">
-                <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 border-b border-slate-200 pb-0.5 mb-1.5">
-                  Work Experience
-                </h2>
-                <div className="space-y-3">
-                  {resumeData.experience.map((exp, idx) => (
-                    <div key={idx}>
-                      <div className="flex justify-between text-xs font-bold text-slate-900">
-                        <span>{exp.position} — <span className="font-semibold text-slate-700">{exp.company}</span></span>
-                        <span className="text-slate-500 font-normal">{exp.start_date} – {exp.end_date}</span>
-                      </div>
-                      <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs text-slate-700">
-                        {exp.bullets?.map((b, bI) => (
-                          <li key={bI}>{b}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Key Projects */}
-            {resumeData.projects && resumeData.projects.length > 0 && (
-              <div className="mb-4">
-                <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 border-b border-slate-200 pb-0.5 mb-1.5">
-                  Projects & Engineering Achievements
-                </h2>
-                <div className="space-y-3">
-                  {resumeData.projects.map((proj, idx) => (
-                    <div key={idx}>
-                      <div className="flex justify-between text-xs font-bold text-slate-900">
-                        <span>{proj.title} {proj.role && <span className="font-normal text-slate-500">| {proj.role}</span>}</span>
-                        {proj.tech_stack && (
-                          <span className="text-[11px] font-normal text-primary">[{proj.tech_stack.join(', ')}]</span>
-                        )}
-                      </div>
-                      <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs text-slate-700">
-                        {proj.bullets?.map((b, bI) => (
-                          <li key={bI}>{b}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Education */}
-            {resumeData.education && resumeData.education.length > 0 && (
-              <div className="mb-4">
-                <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 border-b border-slate-200 pb-0.5 mb-1.5">
-                  Education
-                </h2>
-                <div className="space-y-2">
-                  {resumeData.education.map((edu, idx) => (
-                    <div key={idx} className="flex justify-between text-xs">
-                      <div>
-                        <span className="font-bold text-slate-900">{edu.institution}</span>
-                        <p className="text-slate-600">{edu.degree} in {edu.field_of_study}</p>
-                      </div>
-                      <span className="text-slate-500">{edu.start_date} – {edu.end_date}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <ResumeRenderer
+              data={resumeData}
+              template={template}
+              accentColor={accentColor}
+            />
           </div>
         </div>
       </div>
